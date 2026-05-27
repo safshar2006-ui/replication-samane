@@ -337,3 +337,8 @@ print(suburban_plot)
 
 #  Interpretation
 The figures reveal clear demographic and socioeconomic differences across Houston’s urban and suburban landscapes. The population density map shows a strong concentration of dense urban tracts near the metropolitan core, while lower-density suburban and exurban areas dominate the outer portions of the region. The median household income chart indicates that suburban landscapes, particularly suburban low-density areas, have the highest household incomes, while urban high-density areas have the lowest median incomes. This pattern suggests that wealthier households are concentrated in lower-density suburban environments, whereas denser urban neighborhoods include larger shares of lower-income populations. The population pyramids also show differences between urban and suburban demographic structures. Both landscapes contain large working-age populations, but suburban areas appear to include relatively larger family-age cohorts and older adults, reflecting Houston’s suburban residential development patterns.
+
+# Link to Github
+https://github.com/safshar2006-ui/replication-samane.git
+
+
