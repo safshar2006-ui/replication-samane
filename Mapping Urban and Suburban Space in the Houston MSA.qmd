@@ -18,6 +18,8 @@ library(tidyverse)
 library(sf)
 library(ggplot2)
 library(scales)
+ library(dplyr)
+library(stringr)
 
 options(tigris_use_cache = TRUE)
 
@@ -26,21 +28,22 @@ options(tigris_use_cache = TRUE)
 
 # Introduction
 
-Houston was selected for this project because it is one of the largest and fastest-growing metropolitan areas in the United States and represents a highly decentralized form of urban development. Unlike older monocentric cities that are organized around a single dense downtown core, Houston exhibits extensive suburban expansion and multiple activity centers connected through highways and automobile-oriented infrastructure. This makes Houston an appropriate case for examining the spatial distribution of urban, suburban, and exurban landscapes through Census tract population density classifications.
+Houston is selected for this project because it is one of the largest and fastest-growing metropolitan areas in the United States. Unlike older monocentric cities that are organized around a single dense downtown core, Houston exhibits extensive suburban expansion and multiple activity centers connected through highways and car-oriented infrastructure. This makes Houston an appropriate case for examining the spatial distribution of urban, suburban, and exurban landscapes through Census tract population density classifications.
 
 The landscape map demonstrates that the highest-density urban tracts are concentrated near central Houston and surrounding inner-city neighborhoods. Urban and suburban tracts extend outward along major transportation corridors, while exurban landscapes dominate the outer metropolitan fringe. The overall pattern reflects Houston’s large spatial footprint, continued suburban expansion, and relatively low-density metropolitan growth compared to older northeastern cities.
+
 
 ```{r}
 # census_api_key("51b09e0aa87b1b3a4521e4b1cb12e2ae4f8b1a61", install = TRUE)
 
-# 1. Houston MSA boundary
+# Houston MSA boundary
 cbsa <- core_based_statistical_areas(year = 2020, cb = TRUE)
 
 houston_msa <- cbsa %>%
   filter(str_detect(NAME, "Houston")) %>%
   st_transform(3083)
 
-# 2. 2020 Census tract population
+# 2020 Census tract population
 tract_pop <- get_decennial(
   geography = "tract",
   variables = "P1_001N",
@@ -51,12 +54,12 @@ tract_pop <- get_decennial(
 ) %>%
   st_transform(3083)
 
-# 3. Keep tracts inside Houston MSA
+# Keeping tracts inside Houston MSA
 houston_tracts <- tract_pop %>%
   st_filter(houston_msa, .predicate = st_intersects) %>%
   rename(population = value)
 
-# 4. Calculate area and density
+# Calculating area and density
 houston_tracts <- houston_tracts %>%
   mutate(
     area_km2 = as.numeric(st_area(geometry)) / 1000000,
@@ -74,13 +77,13 @@ houston_tracts <- houston_tracts %>%
     )
   )
 
-# 5. Main landscape map
+# landscape map
 landscape_map <- ggplot(houston_tracts) +
   geom_sf(aes(fill = landscape), color = NA) +
   theme_void() +
   labs(
     title = "Population-density landscapes in the Houston MSA",
-    subtitle = "2020 Census tracts classified using Hanberry-style density thresholds",
+    subtitle = "2020 Census tracts classified using density thresholds",
     fill = "Landscape"
   )
 
@@ -88,6 +91,7 @@ landscape_map <- ggplot(houston_tracts) +
 ggsave("figures/houston_landscape_map.png", landscape_map, width = 9, height = 7, dpi = 300)
 print(landscape_map)
 ```
+
 
 ```{r}
 # ACS
@@ -112,7 +116,7 @@ acs_2020 <- get_acs(
 houston_acs <- houston_tracts %>%
   left_join(acs_2020, by = "GEOID")
 
-# map 2
+# income map
 income_map <- ggplot(houston_acs) +
   geom_sf(aes(fill = median_income), color = NA) +
   scale_fill_viridis_c(labels = dollar) +
@@ -126,7 +130,7 @@ income_map <- ggplot(houston_acs) +
 ggsave("figures/houston_income_map.png", income_map, width = 9, height = 7, dpi = 300)
 print(income_map)
 ```
-
+# Visualizing Median Houshold Income by Landscape Density Threshhhold 
 
 
 ```{r}
@@ -140,7 +144,7 @@ income_chart <- houston_acs %>%
     median_income = median(median_income, na.rm = TRUE)
   ) %>%
   
-  # reorder categories
+  # reordering categories
   mutate(
     landscape = fct_reorder(landscape, median_income)
   ) %>%
@@ -219,19 +223,15 @@ age_data <- get_acs(
 
 # Join with your Houston landscape categories
 age_data <- age_data %>%
-  left_join(
+  inner_join(
     houston_tracts %>%
       st_drop_geometry() %>%
-      select(GEOID, landscape),
+      dplyr::select(GEOID, landscape),
     by = "GEOID"
   )
+```
 
-
-# recode age group
-
-  library(dplyr)
-library(stringr)
-
+```{r}
 age_pyramid <- age_data %>%
   mutate(
     
@@ -265,78 +265,86 @@ age_pyramid <- age_data %>%
       variable %in% c("B01001_024", "B01001_025",
                       "B01001_048", "B01001_049") ~ "85+"
     )
+    
   ) %>%
   filter(!is.na(age_group))
 ```
 
-
-
 ```{r}
-# pyriamd 
-urban_summary <- age_pyramid %>%
-  group_by(sex, age_group) %>%
+age_levels <- c(
+  "0-4", "5-9", "10-14", "15-17", "18-19",
+  "20-24", "25-34", "35-44", "45-54",
+  "55-64", "65-74", "75-84", "85+"
+)
+
+pyramid_data <- age_pyramid %>%
+  mutate(
+    broad_landscape = case_when(
+      landscape %in% c("Urban low", "Urban high") ~ "Urban",
+      landscape %in% c("Suburban low", "Suburban high") ~ "Suburban",
+      TRUE ~ NA_character_
+    ),
+    age_group = factor(age_group, levels = age_levels)
+  ) %>%
+  filter(!is.na(broad_landscape)) %>%
+  group_by(broad_landscape, sex, age_group) %>%
   summarize(
     population = sum(estimate, na.rm = TRUE),
     .groups = "drop"
-  )
-
-
-suburban_summary <- age_pyramid %>%
-  group_by(sex, age_group) %>%
-  summarize(population = sum(estimate, na.rm = TRUE))
-
-# step 6
-urban_summary <- urban_summary %>%
+  ) %>%
+  group_by(broad_landscape) %>%
   mutate(
-    population = ifelse(sex == "Male", -population, population)
-  )
+    percent = population / sum(population) * 100,
+    percent_plot = ifelse(sex == "Male", -percent, percent)
+  ) %>%
+  ungroup()
+```
 
-suburban_summary <- suburban_summary %>%
-  mutate(
-    population = ifelse(sex == "Male", -population, population)
-  )
+```{r}
+urban_plot <- pyramid_data %>%
+  filter(broad_landscape == "Urban") %>%
+  ggplot(aes(x = percent_plot, y = age_group, fill = sex)) +
+  geom_col(width = 0.8) +
+  scale_x_continuous(labels = function(x) paste0(abs(x), "%")) +
+   coord_cartesian(xlim = c(-8, 8)) +
+   labs(
+    title = "Urban Population Pyramid",
+    x = "Share of urban population",
+    y = "Age group",
+    fill = "Sex"
+  ) +
+  theme_minimal()
 
-# step 7
-# urban plot
-urban_plot <- ggplot(
-  urban_summary,
-  aes(x = population, y = age_group, fill = sex)
-) +
-  geom_col() +
-  scale_x_continuous(labels = abs) +
-  theme_minimal() +
-  labs(
-    title = "Urban population pyramid",
-    x = "Population",
-    y = "Age group"
-  )
 print(urban_plot)
 ```
 
 
 
-
 ```{r}
-# suburban plot
-suburban_plot <- ggplot(
-  suburban_summary,
-  aes(x = population, y = age_group, fill = sex)
-) +
-  geom_col() +
-  scale_x_continuous(labels = abs) +
-  theme_minimal() +
+suburban_plot <- pyramid_data %>%
+  filter(broad_landscape == "Suburban") %>%
+  ggplot(aes(x = percent_plot, y = age_group, fill = sex)) +
+  geom_col(width = 0.8) +
+  scale_x_continuous(labels = function(x) paste0(abs(x), "%")) +
+    coord_cartesian(xlim = c(-8, 8)) +
   labs(
-    title = "Suburban population pyramid",
-    x = "Population",
-    y = "Age group"
-  )
+    title = "Suburban Population Pyramid",
+    x = "Share of suburban population",
+    y = "Age group",
+    fill = "Sex"
+  ) +
+  theme_minimal()
+
 print(suburban_plot)
 ```
 
-
-
 #  Interpretation
-The figures reveal clear demographic and socioeconomic differences across Houston’s urban and suburban landscapes. The population density map shows a strong concentration of dense urban tracts near the metropolitan core, while lower-density suburban and exurban areas dominate the outer portions of the region. The median household income chart indicates that suburban landscapes, particularly suburban low-density areas, have the highest household incomes, while urban high-density areas have the lowest median incomes. This pattern suggests that wealthier households are concentrated in lower-density suburban environments, whereas denser urban neighborhoods include larger shares of lower-income populations. The population pyramids also show differences between urban and suburban demographic structures. Both landscapes contain large working-age populations, but suburban areas appear to include relatively larger family-age cohorts and older adults, reflecting Houston’s suburban residential development patterns.
+ 
+The figures suggest that Houston’s landscape pattern reflects both urban concentration and outward suburban expansion. The population-density map shows dense urban tracts clustered near the metropolitan core, while exurban areas dominate the outer edges of the MSA. This pattern is consistent with Houston’s decentralized, highway-oriented growth, where development extends far beyond the central city. 
+
+The income map and bar chart show that median household income is not highest in the densest urban areas. Instead, suburban low-density areas have the highest median income, while urban high-density areas have the lowest median income. This suggests that wealthier households are more concentrated in lower-density suburban settings, while denser urban neighborhoods include more lower-income populations. 
+
+The population pyramids show that both urban and suburban areas have large working-age populations and their composition is very close, but suburban areas appear to have stronger family-age and older adult cohorts. Overall, the analysis shows that Houston’s urban-suburban structure is not only spatial, but also socioeconomic and demographic.
 
 # Link to Github
 https://github.com/safshar2006-ui/replication-samane.git
